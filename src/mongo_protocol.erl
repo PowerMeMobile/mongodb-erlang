@@ -45,8 +45,13 @@ bool (0) -> false;
 bool (1) -> true.
 
 -spec dbcoll (db(), collection()) -> bson:utf8().
-%@doc Concat db and collection name with period (.) in between
-dbcoll (Db, Coll) -> <<(atom_to_binary (Db, utf8)) /binary, $., (atom_to_binary (Coll, utf8)) /binary>>.
+%% %@doc Concat db and collection name with period (.) in between
+dbcoll (Db, Coll) when is_atom(Db) ->
+	dbcoll(<<(atom_to_binary (Db, utf8)) /binary>>, Coll);
+dbcoll (Db, Coll) when is_atom(Coll) ->
+	dbcoll(Db, <<(atom_to_binary (Coll, utf8) /binary)>>);
+dbcoll (Db, Coll) ->
+	<<Db /binary, $., Coll /binary>>.
 
 -type message() :: notice() | request().
 
@@ -105,7 +110,7 @@ get_reply (<<
 			cursornotfound = bool (CursorNotFound), queryerror = bool (QueryError), awaitcapable = bool (AwaitCapable),
 			cursorid = CursorId, startingfrom = StartingFrom, documents = Docs },
 		{ResponseTo, Reply, BinRest}.
-		
+
 get_docs (0, Bin) -> {[], Bin};
 get_docs (NumDocs, Bin) when NumDocs > 0 ->
 	{Doc, Bin1} = get_document (Bin),
