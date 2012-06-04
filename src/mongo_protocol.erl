@@ -49,7 +49,7 @@ bool (1) -> true.
 dbcoll (Db, Coll) when is_atom(Db) ->
 	dbcoll(<<(atom_to_binary (Db, utf8)) /binary>>, Coll);
 dbcoll (Db, Coll) when is_atom(Coll) ->
-	dbcoll(Db, <<(atom_to_binary (Coll, utf8) /binary)>>);
+	dbcoll(Db, <<(atom_to_binary (Coll, utf8)) /binary>>);
 dbcoll (Db, Coll) ->
 	<<Db /binary, $., Coll /binary>>.
 
