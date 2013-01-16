@@ -140,10 +140,15 @@ fetch_member_info (ReplConn = {rs_connection, _ReplName, VConns, _, _}) ->
 add_host (Host, Dict) -> dict:store (Host, {}, Dict).
 
 remove_host (Host, Dict) ->
-	MConn = dict:fetch (Host, Dict),
-	Dict1 = dict:erase (Host, Dict),
-	case MConn of {Conn} -> mongo_connect:close (Conn); {} -> ok end,
-	Dict1.
+	case dict:is_key(Host, Dict) of
+		true ->
+			MConn = dict:fetch (Host, Dict),
+			Dict1 = dict:erase (Host, Dict),
+			case MConn of {Conn} -> mongo_connect:close (Conn); {} -> ok end,
+			Dict1;
+		_ ->
+			Dict
+	end.
 
 -spec connect_member (rs_connection(), host()) -> member_info(). % EIO
 %@doc Connect to host and verify membership. Cache connection in rs_connection
@@ -166,17 +171,17 @@ get_connection (VConns, Host, TimeoutMS, SslOptions) -> mvar:modify (VConns, fun
 			true -> new_connection (Dict, Host, TimeoutMS, SslOptions) end;
 		_ -> new_connection (Dict, Host, TimeoutMS, SslOptions) end end).
 
-new_connection (Dict, Host, TimeoutMS, SslOptions) -> 
+new_connection (Dict, Host, TimeoutMS, SslOptions) ->
 	case SslOptions of
 		false ->
 			case mongo_connect:connect (Host, TimeoutMS) of
 				{ok, Conn} -> {dict:store (Host, {Conn}, Dict), Conn};
-				{error, Reason} -> throw ({cant_connect, Reason}) 
+				{error, Reason} -> throw ({cant_connect, Reason})
 			end;
 		_ ->
 			case mongo_connect:ssl_connect(Host, TimeoutMS, SslOptions) of
 				{ok, Conn} -> {dict:store (Host, {Conn}, Dict), Conn};
-				{error, Reason} -> throw ({cant_connect, Reason}) 
+				{error, Reason} -> throw ({cant_connect, Reason})
 			end
 	end.
 
