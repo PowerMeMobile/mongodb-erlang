@@ -1,8 +1,8 @@
 % Wire protocol message types (records)
 
--type db() :: atom().
+-type db() :: atom() | binary().
 
--type collection() :: atom(). % without db prefix
+-type collection() :: atom() | binary(). % without db prefix
 
 -type cursorid() :: integer().
 
