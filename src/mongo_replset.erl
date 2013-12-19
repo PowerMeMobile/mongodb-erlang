@@ -40,7 +40,10 @@ connect (ReplSet) -> connect (ReplSet, infinity).
 -spec connect (replset(), timeout()) -> rs_connection(). % IO
 %@doc Create new cache of connections to replica set members starting with seed members. No connection attempted until primary or secondary_ok called. Timeout used for initial connection and every call.
 connect ({ReplName, Hosts}, TimeoutMS) ->
-	Dict = dict:from_list (lists:map (fun (Host) -> {mongo_connect:host_port (Host), {}} end, Hosts)),
+	connect({ReplName, Hosts, undefined, undefined, undefined}, TimeoutMS);
+connect ({ReplName, Hosts, DB, User, Pass}, TimeoutMS) ->
+	List = lists:map (fun (Host) -> {mongo_connect:host_port (Host), {undefined, DB, User, Pass}} end, Hosts),
+	Dict = dict:from_list (List),
 	{rs_connection, ReplName, mvar:new (Dict), TimeoutMS, false}.
 
 -spec ssl_connect(replset()) -> rs_connection().
@@ -159,25 +162,53 @@ connect_member ({rs_connection, ReplName, VConns, TimeoutMS, SslOptions}, Host) 
 			mongo_connect:close (Conn),
 			throw ({not_member, ReplName, Host, Info}) end.
 
-get_connection (VConns, Host, TimeoutMS, SslOptions) -> mvar:modify (VConns, fun (Dict) ->
-	case dict:find (Host, Dict) of
-		{ok, {Conn}} -> case mongo_connect:is_closed (Conn) of
-			false -> {Dict, Conn};
-			true -> new_connection (Dict, Host, TimeoutMS, SslOptions) end;
-		_ -> new_connection (Dict, Host, TimeoutMS, SslOptions) end end).
+get_connection (VConns, Host, TimeoutMS, SslOptions) ->
+	mvar:modify (VConns, fun (Dict) ->
+		case dict:find (Host, Dict) of
+			{ok, {undefined, DB, User, Pass}} ->
+				new_connection (Dict, Host, TimeoutMS, SslOptions, DB, User, Pass);
+			{ok, {Conn, DB, User, Pass}} ->
+				case mongo_connect:is_closed (Conn) of
+					false -> {Dict, Conn};
+					true -> new_connection (Dict, Host, TimeoutMS, SslOptions, DB, User, Pass)
+				end
+		end
+	end).
 
-new_connection (Dict, Host, TimeoutMS, SslOptions) -> 
-	case SslOptions of
-		false ->
-			case mongo_connect:connect (Host, TimeoutMS) of
-				{ok, Conn} -> {dict:store (Host, {Conn}, Dict), Conn};
-				{error, Reason} -> throw ({cant_connect, Reason}) 
-			end;
-		_ ->
-			case mongo_connect:ssl_connect(Host, TimeoutMS, SslOptions) of
-				{ok, Conn} -> {dict:store (Host, {Conn}, Dict), Conn};
-				{error, Reason} -> throw ({cant_connect, Reason}) 
-			end
+new_connection (Dict, Host, TimeoutMS, false, DB, User, Pass) ->
+	case mongo_connect:connect (Host, TimeoutMS) of
+		{ok, Conn} -> try_auth(Host, Conn, Dict, DB, User, Pass);
+		{error, Reason} -> throw ({cant_connect, Reason})
+	end;
+new_connection (Dict, Host, TimeoutMS, SslOptions, DB, User, Pass) ->
+	case mongo_connect:ssl_connect(Host, TimeoutMS, SslOptions) of
+		{ok, Conn} -> try_auth(Host, Conn, Dict, DB, User, Pass);
+		{error, Reason} -> throw ({cant_connect, Reason})
 	end.
+
+try_auth(Host, Conn, Dict, DB, undefined, undefined) ->
+	{dict:store (Host, {Conn, DB, undefined, undefined}, Dict), Conn};
+try_auth(Host, Conn, Dict, DB, User, Pass) ->
+	Nonce = bson:at(nonce, command({getnonce, 1}, {DB, Conn})),
+	Hash = pw_key(Nonce, User, Pass),
+	AuthCommand = {authenticate, 1, user, User, nonce, Nonce, key, Hash},
+	try command(AuthCommand, {DB, Conn}) of
+		AuthResult ->
+			{dict:store (Host, {Conn, DB, User, Pass}, Dict), Conn}
+	catch
+		_:Error -> throw({auth_failed, Error})
+	end.
+
+command(Command, Conn) ->
+	mongo_query:command(Conn, Command, true).
+
+pw_key (Nonce, Username, Password) ->
+	bson:utf8 (binary_to_hexstr (crypto:md5 ([Nonce, Username, pw_hash (Username, Password)]))).
+
+pw_hash (Username, Password) ->
+	bson:utf8 (binary_to_hexstr (crypto:md5 ([Username, <<":mongo:">>, Password]))).
+
+binary_to_hexstr (Bin) ->
+	lists:flatten ([io_lib:format ("~2.16.0b", [X]) || X <- binary_to_list (Bin)]).
 
 get_member_info (Conn) -> mongo_query:command ({admin, Conn}, {isMaster, 1}, true).
