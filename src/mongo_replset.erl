@@ -143,10 +143,15 @@ fetch_member_info (ReplConn = {rs_connection, _ReplName, VConns, _, _}) ->
 add_host (Host, Dict) -> dict:store (Host, {}, Dict).
 
 remove_host (Host, Dict) ->
-	MConn = dict:fetch (Host, Dict),
-	Dict1 = dict:erase (Host, Dict),
-	case MConn of {Conn} -> mongo_connect:close (Conn); {} -> ok end,
-	Dict1.
+	case dict:is_key(Host, Dict) of
+		true ->
+			MConn = dict:fetch (Host, Dict),
+			Dict1 = dict:erase (Host, Dict),
+			case MConn of {Conn} -> mongo_connect:close (Conn); {} -> ok end,
+			Dict1;
+		_ ->
+			Dict
+	end.
 
 -spec connect_member (rs_connection(), host()) -> member_info(). % EIO
 %@doc Connect to host and verify membership. Cache connection in rs_connection
@@ -193,7 +198,7 @@ try_auth(Host, Conn, Dict, DB, User, Pass) ->
 	Hash = pw_key(Nonce, User, Pass),
 	AuthCommand = {authenticate, 1, user, User, nonce, Nonce, key, Hash},
 	try command(AuthCommand, {DB, Conn}) of
-		AuthResult ->
+		_AuthResult ->
 			{dict:store (Host, {Conn, DB, User, Pass}, Dict), Conn}
 	catch
 		_:Error -> throw({auth_failed, Error})
