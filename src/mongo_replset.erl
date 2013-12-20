@@ -89,7 +89,12 @@ secondary_ok (ReplConn) -> try
 -spec close (rs_connection()) -> ok. % IO
 %@doc Close replset connection
 close ({rs_connection, _, VConns, _, _}) ->
-	CloseConn = fun (_, MCon, _) -> case MCon of {Con} -> mongo_connect:close (Con); {} -> ok end end,
+	CloseConn = fun (_, MCon, _) ->
+		case MCon of
+			{undefined, _DB, _User, _Pass} -> ok;
+			{Con, _DB, _User, _Pass} -> mongo_connect:close (Con)
+		end
+	end,
 	mvar:with (VConns, fun (Dict) -> dict:fold (CloseConn, ok, Dict) end),
 	mvar:terminate (VConns).
 
@@ -124,7 +129,9 @@ secondary_ok_conn (ReplConn, Hosts) -> try
 -spec fetch_member_info (rs_connection()) -> member_info(). % EIO
 %@doc Retrieve isMaster info from a current known member in replica set. Update known list of members from fetched info.
 fetch_member_info (ReplConn = {rs_connection, _ReplName, VConns, _, _}) ->
-	OldHosts_ = dict:fetch_keys (mvar:read (VConns)),
+	Dict0 = mvar:read (VConns),
+	{DB, User, Pass} = get_creds(Dict0),
+	OldHosts_ = dict:fetch_keys (Dict0),
 	{Conn, Info} = until_success (OldHosts_, fun (Host) -> connect_member (ReplConn, Host) end),
 	OldHosts = sets:from_list (OldHosts_),
 	NewHosts = sets:from_list (lists:map (fun mongo_connect:read_host/1, bson:at (hosts, Info))),
@@ -132,7 +139,7 @@ fetch_member_info (ReplConn = {rs_connection, _ReplName, VConns, _, _}) ->
 	AddedHosts = sets:subtract (NewHosts, OldHosts),
 	mvar:modify_ (VConns, fun (Dict) ->
 		Dict1 = sets:fold (fun remove_host/2, Dict, RemovedHosts),
-		Dict2 = sets:fold (fun add_host/2, Dict1, AddedHosts),
+		{Dict2, _, _, _} = sets:fold (fun add_host/2, {Dict1, DB, User, Pass}, AddedHosts),
 		Dict2 end),
 	case sets:is_element (mongo_connect:conn_host (Conn), RemovedHosts) of
 		false -> {Conn, Info};
@@ -140,14 +147,26 @@ fetch_member_info (ReplConn = {rs_connection, _ReplName, VConns, _, _}) ->
 			Hosts = dict:fetch_keys (mvar:read (VConns)),
 			until_success (Hosts, fun (Host) -> connect_member (ReplConn, Host) end) end.
 
-add_host (Host, Dict) -> dict:store (Host, {}, Dict).
+get_creds(Dict) ->
+	get_creds(dict:fetch_keys(Dict), Dict).
+get_creds([], _Dict) ->
+	{undefined, undefined, undefined};
+get_creds([Key | _], Dict) ->
+	{_, DB, User, Pass} = dict:fetch(Key, Dict),
+	{DB, User, Pass}.
+add_host (Host, {Dict, DB, User, Pass}) ->
+	Dict1 = dict:store (Host, {undefined, DB, User, Pass}, Dict),
+	{Dict1, DB, User, Pass}.
 
 remove_host (Host, Dict) ->
 	case dict:is_key(Host, Dict) of
 		true ->
 			MConn = dict:fetch (Host, Dict),
 			Dict1 = dict:erase (Host, Dict),
-			case MConn of {Conn} -> mongo_connect:close (Conn); {} -> ok end,
+			case MConn of
+				{undefined, _DB, _User, _Pass} -> ok;
+				{Conn, _DB, _User, _Pass} -> mongo_connect:close (Conn)
+			end,
 			Dict1;
 		_ ->
 			Dict
