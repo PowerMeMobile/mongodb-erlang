@@ -27,6 +27,9 @@
 	command/1,
 	ensure_index/2
 ]).
+
+-export([auth/2]).
+
 % TODO: add auth/2
 
 -include("mongo_protocol.hrl").
@@ -271,4 +274,23 @@ read_one(Request) ->
 		[] -> {};
 		[Doc | _] -> {Doc}
 	end.
+
+%% @doc Auth to MongoDB	
+-spec auth(bson:utf8(), bson:utf8()) -> bson:document().
+auth(Username, Password) ->
+    Nonce = bson:at (nonce, command ({getnonce, 1})),
+	command({authenticate, 1, user, Username, nonce, Nonce, key, pw_key (Nonce, Username, Password)}).
+
+
+%% @private
+pw_key(Nonce, Username, Password) -> 
+	bson:utf8(binary_to_hexstr (crypto:md5 ([Nonce, Username, pw_hash(Username, Password)]))).
+
+%% @private
+pw_hash(Username, Password) -> 
+	bson:utf8(binary_to_hexstr (crypto:md5 ([Username, <<":mongo:">>, Password]))).
+
+%% @private
+binary_to_hexstr(Bin) ->
+    lists:flatten([io_lib:format ("~2.16.0b", [X]) || X <- binary_to_list(Bin)]).
 
