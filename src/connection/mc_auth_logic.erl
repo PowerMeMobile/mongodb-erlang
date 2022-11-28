@@ -48,14 +48,7 @@ mongodb_cr_auth(Connection, Database, Login, Password) ->
 %% @private
 -spec scram_sha_1_auth(port(), binary(), binary(), binary()) -> boolean().
 scram_sha_1_auth(Connection, Database, Login, Password) ->
-  try
-    scram_first_step(Connection, Database, Login, Password)
-  catch
-    R:S ->
-      erlang:error(<<"Can't pass authentication.">>),
-      erlang:error(R),
-      erlang:error(S)
-  end.
+    scram_first_step(Connection, Database, Login, Password).
 
 %% @private
 scram_first_step(Connection, Database, Login, Password) ->
