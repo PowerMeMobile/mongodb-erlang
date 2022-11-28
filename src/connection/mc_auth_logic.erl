@@ -51,8 +51,10 @@ scram_sha_1_auth(Connection, Database, Login, Password) ->
   try
     scram_first_step(Connection, Database, Login, Password)
   catch
-    _:_ ->
-      erlang:error(<<"Can't pass authentication">>)
+    R:S ->
+      erlang:error(<<"Can't pass authentication.">>),
+      erlang:error(R),
+      erlang:error(S)
   end.
 
 %% @private
